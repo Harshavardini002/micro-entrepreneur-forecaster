@@ -87,20 +87,8 @@ def fetch_missing_low_data():
         user_agent=os.getenv("REDDIT_USER_AGENT")
     )
     
-    # Load existing data
-    input_dir = "data/raw"
-    raw_files = [f for f in os.listdir(input_dir) if f.startswith("raw_social_data_") and f.endswith(".json")]
-    latest_file = max(raw_files, key=lambda x: os.path.getmtime(os.path.join(input_dir, x)))
-    input_file = os.path.join(input_dir, latest_file)
-    with open(input_file, "r") as f:
-        all_posts = json.load(f)
-    
-    # Preserve data for high-data products
-    products_to_preserve = [
-        "beaded jewelry", "ceramic tableware", "handmade earrings",
-        "handmade soap", "leather bag", "handmade painting", "vegan soap"
-    ]
-    preserved_posts = [entry for entry in all_posts if entry.get("product") in products_to_preserve]
+    # Start fresh instead of loading existing data
+    all_posts = []
     
     # Define search queries for new alternative products and embroidered textile
     search_queries = [
@@ -146,21 +134,23 @@ def fetch_missing_low_data():
     for query, product_name in search_queries:
         print(f"Fetching data for {product_name} using query: {query}")
         posts, comments = fetch_reddit_data(query, product_name, max_posts=500, max_comments=100, existing_posts=existing_posts, reddit=reddit)
-        preserved_posts.extend(posts)
+        all_posts.extend(posts)
         for comment in comments:
-            preserved_posts.append({
+            all_posts.append({
                 "id": f"comment_{hash(comment)}",
                 "product": product_name,
                 "text": comment,
                 "created_at": datetime.now().strftime("%Y-%m-%d")
             })
     
-    # Save merged data
+    # Save data
     output_dir = "data/raw"
-    output_file = os.path.join(output_dir, f"raw_social_data_{datetime.now().strftime('%Y%m%d')}.json")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = os.path.join(output_dir, f"raw_social_data_low_{timestamp}.json")
+    os.makedirs(output_dir, exist_ok=True)
     with open(output_file, "w") as f:
-        json.dump(preserved_posts, f, indent=4)
-    print(f"Saved {len(preserved_posts)} posts/comments to {output_file}")
+        json.dump(all_posts, f, indent=4)
+    print(f"Saved {len(all_posts)} posts/comments to {output_file}")
 
 if __name__ == "__main__":
     fetch_missing_low_data()

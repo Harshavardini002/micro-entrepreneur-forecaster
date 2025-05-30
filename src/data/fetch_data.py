@@ -6,10 +6,10 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-def fetch_reddit_data(query, product_name, max_posts=300, existing_posts=None, reddit=None):
+def fetch_reddit_data(query, product_name, max_posts=300, max_comments=100, existing_posts=None, reddit=None):
     if existing_posts is None:
         existing_posts = set()
-    cache_file = f"data/cache/{query.replace(' ', '_')}_top.pkl"
+    cache_file = f"data/cache/{query.replace(' ', '_')}.pkl"
     
     # Check cache
     if os.path.exists(cache_file):
@@ -26,10 +26,14 @@ def fetch_reddit_data(query, product_name, max_posts=300, existing_posts=None, r
     product_keywords = product_name.lower().split()
     
     results, comments = [], []
-    # Subreddit selection for high-data products
+    # Combined subreddits for all products
     base_subreddits = (
-        "Crafts+Handmade+Soapmaking+Artisan+Art+Etsy+HomeDecor+DIY+RedditMade+SmallBusiness+"
-        "SomethingIMade+HandmadeGifts+JewelryMaking+Beading+Leathercraft+ArtMarket+Watercolor"
+        "Crafts+Handmade+Knitting+IndianArt+Artisan+Art+Etsy+HomeDecor+TextileArts+Ceramics+TraditionalArt+"
+        "SouthAsianArt+FiberArts+DIY+Vintage+RedditMade+SmallBusiness+SomethingIMade+HandmadeGifts+"
+        "KnittingPatterns+Crochet+PotteryStudio+CeramicArt+TextileDesign+IndianFashion+VintageDecor+"
+        "CandleMakers+Woodworking+Carving+Soapmakers+NaturalBeauty+ArtMarket+DIYGifts+Crafty+"
+        "ThriftStoreHauls+Frugal+Anticonsumption+SustainableLiving+Minimalism+Decor+InteriorDesign+"
+        "Jewelry+Quilting+Sustainable+Soapmaking+JewelryMaking+Beading+Leathercraft+Watercolor"
     )
     
     try:
@@ -45,11 +49,12 @@ def fetch_reddit_data(query, product_name, max_posts=300, existing_posts=None, r
                     "id": post.id,
                     "product": product_name,
                     "text": post_text,
+                    "type": "post",
                     "created_at": datetime.fromtimestamp(post.created_utc).strftime("%Y-%m-%d")
                 })
                 existing_posts.add(post_text)
                 post.comments.replace_more(limit=0)
-                for comment in post.comments.list()[:30]:
+                for comment in post.comments.list()[:max_comments]:
                     comment_lower = comment.body.lower()
                     if (len(comment.body) > 20 and
                         (any(keyword in comment_lower for keyword in product_keywords) or
@@ -74,7 +79,7 @@ def fetch_reddit_data(query, product_name, max_posts=300, existing_posts=None, r
     
     return results, comments
 
-def fetch_top_products():
+def fetch_data():
     # Load environment variables
     load_dotenv()
     reddit = praw.Reddit(
@@ -89,45 +94,87 @@ def fetch_top_products():
     all_posts = []
     existing_posts = set()
     
-    # Define queries for high-data products only
+    # Define search queries for all products
     search_queries = [
+        # Beaded Jewelry
         ("beaded jewelry", "beaded jewelry"),
         ("handmade beaded jewelry", "beaded jewelry"),
         ("artisan beaded jewelry", "beaded jewelry"),
+        # Handmade Earrings
         ("handmade earrings", "handmade earrings"),
         ("artisan earrings", "handmade earrings"),
         ("handcrafted earrings", "handmade earrings"),
+        # Handmade Painting
         ("handmade painting", "handmade painting"),
         ("artisan painting", "handmade painting"),
         ("handcrafted painting", "handmade painting"),
+        # Handmade Soap
         ("handmade soap", "handmade soap"),
         ("artisan soap", "handmade soap"),
         ("handcrafted soap", "handmade soap"),
+        # Leather Bag
         ("leather bag", "leather bag"),
         ("handmade leather bag", "leather bag"),
         ("artisan leather bag", "leather bag"),
+        # Handmade Brass Jewelry
+        ("Handmade Brass Bangles", "handmade brass jewelry"),
+        ("Brass Necklace", "handmade brass jewelry"),
+        ("Artisan Brass Jewelry", "handmade brass jewelry"),
+        ("handmade brass", "handmade brass jewelry"),
+        # Handmade Beeswax Candle
+        ("Handmade Beeswax Candle", "handmade beeswax candle"),
+        ("Beeswax Candle", "handmade beeswax candle"),
+        ("Eco-Friendly Beeswax Candle", "handmade beeswax candle"),
+        ("natural beeswax candle", "handmade beeswax candle"),
+        # Handwoven Shawl
+        ("Handwoven Shawl", "handwoven shawl"),
+        ("Pashmina Shawl", "handwoven shawl"),
+        ("Traditional Handwoven Shawl", "handwoven shawl"),
+        ("handmade shawl", "handwoven shawl"),
+        # Handmade Terracotta Decor
+        ("Handmade Terracotta Planter", "handmade terracotta decor"),
+        ("Terracotta Figurine", "handmade terracotta decor"),
+        ("Rustic Terracotta Decor", "handmade terracotta decor"),
+        ("terracotta craft", "handmade terracotta decor"),
+        # Handmade Wooden Utensils
+        ("Handmade Wooden Spoon", "handmade wooden utensils"),
+        ("Wooden Bowl", "handmade wooden utensils"),
+        ("Eco-Friendly Wooden Utensils", "handmade wooden utensils"),
+        ("handmade wooden kitchen", "handmade wooden utensils"),
+        # Embroidered Textile
+        ("Hand Embroidery", "embroidered textile"),
+        ("Floral Embroidery", "embroidered textile"),
+        ("Minimalist Embroidery", "embroidered textile"),
+        ("embroidered fabric", "embroidered textile"),
+        ("handmade embroidery", "embroidered textile"),
+        # Vegan Soap
+        ("Cold Process Soap", "vegan soap"),
+        ("Essential Oil Soap", "vegan soap"),
+        ("Zero Waste Soap", "vegan soap"),
     ]
     
     # Fetch data for all queries
     for query, product_name in search_queries:
-        posts, comments = fetch_reddit_data(query, product_name, max_posts=300, existing_posts=existing_posts, reddit=reddit)
+        print(f"Fetching data for {product_name} using query: {query}")
+        posts, comments = fetch_reddit_data(query, product_name, max_posts=300, max_comments=100, existing_posts=existing_posts, reddit=reddit)
         all_posts.extend(posts)
         for comment in comments:
             all_posts.append({
                 "id": f"comment_{hash(comment)}",
                 "product": product_name,
                 "text": comment,
+                "type": "comment",
                 "created_at": datetime.now().strftime("%Y-%m-%d")
             })
     
     # Save data
     output_dir = "data/raw"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = os.path.join(output_dir, f"raw_social_data_top_{timestamp}.json")
+    output_file = os.path.join(output_dir, f"raw_social_data_{timestamp}.json")
     os.makedirs(output_dir, exist_ok=True)
     with open(output_file, "w") as f:
         json.dump(all_posts, f, indent=4)
     print(f"Saved {len(all_posts)} posts/comments to {output_file}")
 
 if __name__ == "__main__":
-    fetch_top_products()
+    fetch_data()

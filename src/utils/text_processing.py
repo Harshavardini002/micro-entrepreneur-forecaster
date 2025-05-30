@@ -1,137 +1,287 @@
-import spacy
-import re
+import os
+import json
+import pandas as pd
 from textblob import TextBlob
+from collections import Counter
+import re
+from datetime import datetime
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
-
-def preprocess_text(text):
-    """
-    Extract precise keywords using spaCy and regex, returning a list of tokens.
-    """
-    if not isinstance(text, str):
-        return []  # Return empty list if input is not a string
-    keywords = []
-    text_lower = text.lower()
-    doc = nlp(text)
+def text_processing():
+    # Step 1: Load the latest raw data file
+    input_dir = "data/raw"
+    print(f"Listing files in {input_dir}:")
+    all_files = os.listdir(input_dir)
+    print(all_files)
     
-    # Product patterns for specific artisan products
-    product_patterns = [
-        (r'handmade\s*(soap|soaps)|organic\s*soap|vegan\s*soap|soap|shampoo', "handmade soap"),
-        (r'handmade\s*(scarf|scarves)|knitted\s*(scarf|scarves)|crochet\s*(scarf|scarves)|scarf|shawl', "handmade scarf"),
-        (r'pottery|ceramic|ceramics|vase|bowl|plate', "pottery"),
-        (r'handwoven\s*(basket|baskets)|woven\s*basket|basket|woven', "handwoven basket"),
-        (r'embroidered\s*(textile|shawl|saree)|textile|cloth', "embroidered textile"),
-        (r'wood\s*(carving|sculpture)|handcarved\s*wood|carving|wooden', "wood carving"),
-        (r'beaded\s*(jewelry|necklace|bracelet)|handmade\s*jewelry|jewelry|necklace|bracelet|bead|beads', "beaded jewelry"),
-        (r'leather\s*(bag|handbag)|artisan\s*leather|bag|handbag|purse', "leather bag"),
-        (r'brass\s*(lamp|light)|handmade\s*brass|lamp|light|lantern', "brass lamp"),
-        (r'block\s*printed\s*(fabric|textile)|hand\s*block\s*print|fabric|print|printed', "block printed fabric"),
-        (r'handmade\s*(candle|candles)|soy\s*candle|candle|candles', "handmade candle"),
-        (r'ceramic\s*(tableware|plates|bowls)|handmade\s*tableware|tableware|plates|bowls|dishes', "ceramic tableware"),
-        (r'madhubani\s*(painting|art)|mithila\s*art', "madhubani painting"),
-        (r'handmade\s*(painting|artwork)|original\s*painting\s*-abstract|painting|artwork|art|canvas', "handmade painting"),
-        (r'handmade\s*(earring|earrings)|stud\s*earrings|dangle\s*earrings|earring|earrings|studs|dangles', "handmade earrings")
+    raw_files = [f for f in all_files if f.startswith("raw_social_data_") and f.endswith(".json")]
+    
+    if not raw_files:
+        print("Error: No raw data files found in data/raw/")
+        return
+    
+    latest_file = max(raw_files, key=lambda x: os.path.getmtime(os.path.join(input_dir, x)))
+    input_file = os.path.join(input_dir, latest_file)
+    
+    print(f"Fetching file: {input_file}")
+    try:
+        with open(input_file, "r") as f:
+            raw_data = json.load(f)
+    except Exception as e:
+        print(f"Error loading {input_file}: {e}")
+        return
+    
+    print(f"Loaded {len(raw_data)} entries from 1 file")
+    
+    # Define all products to ensure they are included
+    all_products = [
+        "beaded jewelry", "handmade earrings", "handmade painting", "handmade soap",
+        "leather bag", "handmade brass jewelry", "handmade beeswax candle",
+        "handwoven shawl", "handmade terracotta decor", "handmade wooden utensils",
+        "embroidered textile", "vegan soap"
     ]
     
-    # Match product patterns (prioritize the main product)
-    matched_product = None
-    for pattern, keyword in product_patterns:
-        if re.search(pattern, text_lower):
-            matched_product = keyword
-            keywords.append(keyword)
-            break  # Stop after the first product match to avoid duplicates
+    # Step 2: Analyze keywords, sentiment, and compute popularity
+    product_stats = {}
+    all_texts = []
     
-    # Extract descriptive terms (adjectives or relevant nouns)
+    for entry in raw_data:
+        product = entry["product"]
+        text = entry["text"]
+        
+        # Initialize product stats
+        if product not in product_stats:
+            product_stats[product] = {"texts": [], "all_words": [], "sentiments": []}
+        
+        # Clean text: Remove punctuation except spaces, convert to lowercase
+        text = re.sub(r'[^\w\s]', ' ', text.lower()).strip()
+        text = re.sub(r'\s+', ' ', text)  # Normalize multiple spaces to single space
+        product_stats[product]["texts"].append(text)
+        all_texts.append(text)
+        
+        # Store words for keyword diversity
+        words = text.split()
+        product_stats[product]["all_words"].extend(words)
+        
+        # Calculate sentiment
+        sentiment = TextBlob(text).sentiment.polarity  # -1 to 1 scale
+        product_stats[product]["sentiments"].append(sentiment)
+    
+    # Ensure all products are in product_stats
+    for product in all_products:
+        if product not in product_stats:
+            product_stats[product] = {"texts": [], "all_words": [], "sentiments": []}
+    
+    # Step 3: Summarize keywords, relevance, sentiment, and popularity
+    analysis_data = {"product_stats": {}, "keywords": []}
+    
+    # Expanded stop words list to exclude boring words and platform terms
+    stop_words = {
+        "i", "the", "a", "and", "to", "of", "is", "in", "for", "on",
+        "have", "your", "they", "just", "it", "that", "this", "with",
+        "are", "you", "at", "but", "my", "was", "so", "be", "not",
+        "all", "can", "from", "as", "or", "if", "me", "like", "handmade",
+        "product", "products", "etsy", "com", "shop", "s", "t", "https",
+        "www", "http", "m", "off", "code", "coupon", "nice", "great",
+        "thanks", "love it", "cool", "awesome"
+    }
+    
+    # Define variations for product tokens
+    token_variations = {
+        "jewelry": ["jewelry", "jewellery", "jewelrymaking", "jewel"],
+        "soap": ["soap", "soaps", "soaping", "soaper", "handmadesoap"],
+        "candle": ["candle", "candles"],
+        "textile": ["textile", "textiles"],
+        "shawl": ["shawl", "shawls"],
+        "utensils": ["utensils", "utensil"],
+        "bag": ["bag", "bags"],
+        "painting": ["painting", "paintings"],
+        "earrings": ["earrings", "earring"],
+        "decor": ["decor", "decoration", "decorations"],
+        "beaded": ["beaded", "beading", "beads"],
+        "handmade": ["handmade", "handcrafted"],
+        "vegan": ["vegan", "plantbased"],
+        "brass": ["brass", "brassy"],
+        "beeswax": ["beeswax", "bee"],
+        "handwoven": ["handwoven", "woven"],
+        "terracotta": ["terracotta", "terra"],
+        "wooden": ["wooden", "wood"],
+        "embroidered": ["embroidered", "embroidery"]
+    }
+    
+    # Descriptive terms from fetching scripts
     descriptive_terms = [
-        'organic', 'vegan', 'natural', 'luxury', 'exfoliating', 'hydrating', 'eco-friendly',
-        'beautiful', 'unique', 'vibrant', 'stunning', 'handcrafted', 'cozy', 'rustic', 'intricate',
-        'elegant', 'artisan', 'traditional', 'modern', 'authentic', 'ornate', 'delicate', 'textured',
-        'tarnish resistant', 'stainless steel', 'titanium', 'custom', 'smooth', 'soft', 'shiny',
-        'colorful', 'lightweight', 'durable', 'scented', 'fragrant', 'herbal', 'lavender', 'chinese',
-        'popular', 'basic', 'household', 'marseille', 'black', 'protective', 'frozen', 'refrigerated',
-        'amazing', 'wonderful', 'gorgeous', 'lovely', 'perfect', 'excellent', 'rich', 'vibrant'
+        "handmade", "artisan", "craft", "diy", "organic", "vegan", "natural", "traditional",
+        "authentic", "rustic", "unique", "custom", "for sale", "buy", "shop", "etsy", "made",
+        "create", "design"
     ]
-    for token in doc:
-        token_text = token.text.lower()
-        if token_text in descriptive_terms:
-            keywords.append(token_text)
     
-    # Extract noun chunks with strict constraints
-    for chunk in doc.noun_chunks:
-        chunk_text = chunk.text.lower().strip()
-        # Skip chunks that are variations of the matched product
-        if matched_product and any(word in chunk_text for word in matched_product.split()):
+    # Compute keyword diversity for normalization
+    keyword_diversities = {}
+    print("\nComputing Keyword Diversities:")
+    print("=" * 40)
+    for product, stats in product_stats.items():
+        texts = stats["texts"]
+        if not texts:  # Skip products with no texts
+            keyword_diversities[product] = 0
             continue
-        if any(word in chunk_text for word in ['soap', 'scarf', 'pottery', 'basket', 'textile', 'carving', 'jewelry', 'bag', 'lamp', 'fabric', 'candle', 'tableware', 'painting', 'earring']):
-            if (len(chunk_text.split()) <= 4 and
-                len(chunk_text) > 3 and
-                not chunk_text.startswith(('a ', 'the ', 'my ', 'this ', 'some ')) and
-                not any(bad in chunk_text for bad in [
-                    'digital', 'sale', 'shop', 'etsy', 'figurine', 'duck', 'frog', 'course', 'class', 'awesome'
-                ])):
-                keywords.append(chunk_text)
+        
+        # Clean product name and split into tokens
+        cleaned_product = re.sub(r'[^\w\s]', ' ', product.lower()).strip()
+        product_tokens = cleaned_product.split()
+        
+        # Expand product tokens with variations
+        expanded_tokens = []
+        for token in product_tokens:
+            if token in token_variations:
+                expanded_tokens.extend(token_variations[token])
+            else:
+                expanded_tokens.append(token)
+        
+        # Product-specific keywords
+        product_words = stats["all_words"]
+        product_common_words = Counter(product_words).most_common(50)
+        product_tokens_set = set(expanded_tokens)
+        product_keywords = [word for word, count in product_common_words if word not in stop_words and word not in product_tokens_set][:3]
+        keyword_diversity = len(set(word for word in product_words if word not in stop_words and word not in product_tokens_set))
+        keyword_diversities[product] = keyword_diversity
+        print(f"Product: {product}, Keyword Diversity: {keyword_diversity}")
     
-    # Extract entities (e.g., herbs like "cebaiye")
-    for ent in doc.ents:
-        ent_text = ent.text.lower()
-        if ent.label_ in ["PERSON", "ORG", "PRODUCT", "GPE"] and len(ent_text.split()) <= 3:
-            # Skip entities that are variations of the matched product
-            if matched_product and any(word in ent_text for word in matched_product.split()):
-                continue
-            if ent_text not in ['i', 'we', 'you', 'they', 'it', 'this', 'that']:
-                keywords.append(ent_text)
+    # Find max keyword diversity for normalization
+    max_keyword_diversity = max(keyword_diversities.values()) if keyword_diversities else 1
+    print(f"\nMax Keyword Diversity: {max_keyword_diversity}")
     
-    # Extract adjectives (strictly from descriptive terms)
-    for token in doc:
-        if token.pos_ == "ADJ":
-            token_text = token.text.lower()
-            if token_text in descriptive_terms and token_text not in keywords:
-                keywords.append(token_text)
+    for product, stats in product_stats.items():
+        texts = stats["texts"]
+        sentiments = stats["sentiments"]
+        if not texts:  # Handle products with no texts
+            analysis_data["product_stats"][product] = {
+                "posts": 0,
+                "comments": 0,
+                "total": 0,
+                "relevant": 0,
+                "relevance_percentage": 0,
+                "popularity_score": 0,
+                "avg_sentiment": 0,
+                "negative_percentage": 0,
+                "keywords": []
+            }
+            continue
+        
+        # Clean product name and split into tokens
+        cleaned_product = re.sub(r'[^\w\s]', ' ', product.lower()).strip()
+        product_tokens = cleaned_product.split()
+        
+        # Expand product tokens with variations
+        expanded_tokens = []
+        for token in product_tokens:
+            if token in token_variations:
+                expanded_tokens.extend(token_variations[token])
+            else:
+                expanded_tokens.append(token)
+        
+        # Relevance: Align with fetching logic - match at least one product token OR one descriptive term
+        relevant_texts = []
+        # Debug: Print relevance checks for specific products
+        if product in ["beaded jewelry", "handmade soap"]:
+            print(f"\nDebugging Relevance for Product: {product}")
+            print("=" * 40)
+            print(f"Expanded Tokens: {expanded_tokens}")
+            print(f"Descriptive Terms: {descriptive_terms}")
+            for text in texts[:5]:  # Limit to first 5 for brevity
+                text_lower = text.lower()
+                # Check for product tokens
+                token_matches = [token for token in expanded_tokens if any(token in word for word in text_lower.split())]
+                # Check for descriptive terms
+                desc_matches = [term for term in descriptive_terms if any(term in word for word in text_lower.split())]
+                
+                # Relevance: At least one product token OR one descriptive term
+                is_relevant = len(token_matches) > 0 or len(desc_matches) > 0
+                
+                print(f"Text: {text}")
+                print(f"Token Matches: {token_matches}")
+                print(f"Descriptive Term Matches: {desc_matches}")
+                print(f"Is Relevant: {is_relevant}")
+                print("-" * 20)
+        
+        # Debug: Print texts that are not relevant
+        non_relevant_texts = []
+        for text in texts:
+            text_lower = text.lower()
+            token_matches = [token for token in expanded_tokens if any(token in word for word in text_lower.split())]
+            desc_matches = [term for term in descriptive_terms if any(term in word for word in text_lower.split())]
+            is_relevant = len(token_matches) > 0 or len(desc_matches) > 0
+            
+            if is_relevant:
+                relevant_texts.append(text)
+            else:
+                non_relevant_texts.append(text)
+        
+        if non_relevant_texts and product in ["beaded jewelry", "handmade soap"]:
+            print(f"\nNon-Relevant Texts for Product: {product}")
+            print("=" * 40)
+            for text in non_relevant_texts[:5]:
+                print(f"Text: {text}")
+                print("-" * 20)
+        
+        relevance_percentage = (len(relevant_texts) / len(texts)) * 100 if texts else 0
+        
+        # Sentiment analysis
+        avg_sentiment = sum(sentiments) / len(sentiments) if sentiments else 0
+        negative_percentage = (sum(1 for s in sentiments if s < 0) / len(sentiments)) * 100 if sentiments else 0
+        
+        # Product-specific keywords
+        product_words = stats["all_words"]
+        product_common_words = Counter(product_words).most_common(50)
+        product_tokens_set = set(expanded_tokens)
+        product_keywords = [word for word, count in product_common_words if word not in stop_words and word not in product_tokens_set][:3]
+        
+        # Popularity score: Total entries * (Keyword Diversity / Max Keyword Diversity)
+        total_entries = len(texts)
+        keyword_diversity = keyword_diversities.get(product, 0)
+        popularity_score = total_entries * (keyword_diversity / max_keyword_diversity) if max_keyword_diversity > 0 else 0
+        
+        analysis_data["product_stats"][product] = {
+            "posts": sum(1 for entry in raw_data if entry["product"] == product and entry.get("type") == "post"),
+            "comments": sum(1 for entry in raw_data if entry["product"] == product and entry.get("type") == "comment"),
+            "total": len(texts),
+            "relevant": len(relevant_texts),
+            "relevance_percentage": relevance_percentage,
+            "popularity_score": popularity_score,
+            "avg_sentiment": avg_sentiment,
+            "negative_percentage": negative_percentage,
+            "keywords": product_keywords
+        }
     
-    # Expanded blacklist to remove generic terms
-    blacklist = [
-        'soap', 'soaps', 'shampoo', 'scarf', 'scarves', 'shawl', 'pottery', 'ceramic', 'ceramics', 'vase', 'bowl', 'plate', 'basket', 'baskets', 'woven',
-        'textile', 'cloth', 'saree', 'carving', 'sculpture', 'wooden', 'jewelry', 'necklace', 'bracelet', 'bead', 'beads', 'bag', 'handbag', 'purse',
-        'lamp', 'light', 'lantern', 'fabric', 'print', 'printed', 'candle', 'candles', 'tableware', 'plates', 'bowls', 'dishes', 'madhubani', 'mithila',
-        'painting', 'artwork', 'art', 'canvas', 'earring', 'earrings', 'studs', 'dangles',
-        'also', 'always', 'here', 'just', 'many', 'more', 'most', 'once', 'only', 'perhaps', 'then', 'very', 'firstly', 'maybe', 'good',
-        'different', 'little', 'social', 'cold', 'handmade', 'western', 'are', 'being', 'is', 'was', 'were', 'be', 'have', 'has', 'had',
-        'do', 'does', 'did', 'can', 'could', 'will', 'would', 'should', 'might', 'must', 'shall', 'i', 'we', 'you', 'he', 'she', 'it',
-        'they', 'this', 'that', 'these', 'those', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'what', 'which', 'who', 'whom',
-        'whose', 'when', 'where', 'why', 'how', 'not', 'no', 'yes', 'so', 'but', 'and', 'or', 'if', 'because', 'while', 'after', 'before',
-        'since', 'until', 'though', 'although', 'even', 'as', 'like', 'with', 'without', 'in', 'on', 'at', 'to', 'for', 'from', 'by',
-        'about', 'into', 'over', 'under', 'above', 'below', 'between', 'among', 'through', 'during', 'within', 'against', 'across', 'things'
-    ]
-    # Remove duplicates, apply blacklist, and limit to 5 keywords
-    keywords = sorted(list(set(k for k in keywords if k and k not in blacklist and len(k) > 2)))
-    # Prioritize: product first, then descriptive terms, then entities/noun chunks
-    final_keywords = []
-    # Add the product keyword first
-    if matched_product:
-        final_keywords.append(matched_product)
-    # Add descriptive terms
-    for kw in keywords:
-        if kw in descriptive_terms and len(final_keywords) < 5:
-            final_keywords.append(kw)
-    # Add entities and noun chunks if space remains
-    for kw in keywords:
-        if kw not in final_keywords and kw not in descriptive_terms and len(final_keywords) < 5:
-            final_keywords.append(kw)
+    # General keywords
+    all_words = " ".join(all_texts).split()
+    common_words = Counter(all_words).most_common(50)
+    analysis_data["keywords"] = [word for word, count in common_words if word not in stop_words][:5]
     
-    return final_keywords
-
-def get_sentiment(text):
-    """
-    Compute sentiment polarity (-1 to 1) using TextBlob.
-    """
-    if not isinstance(text, str):
-        return 0.0  # Return neutral sentiment if input is not a string
-    return TextBlob(text).sentiment.polarity
+    # Step 4: Save analysis
+    output_dir = "data/processed"
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = os.path.join(output_dir, f"data_analysis_{timestamp}.json")
+    with open(output_file, "w") as f:
+        json.dump(analysis_data, f)
+    print(f"Saved analysis to {output_file}")
+    
+    # Print summary
+    print("\nKeyword, Sentiment, and Popularity Analysis Summary:")
+    print("=" * 30)
+    for product in all_products:  # Ensure all products are printed
+        stats = analysis_data["product_stats"][product]
+        print(f"Product: {product}")
+        print(f"  Popularity Score: {stats['popularity_score']:.2f}")
+        print(f"  Relevance Percentage: {stats['relevance_percentage']:.2f}%")
+        print(f"  Average Sentiment: {stats['avg_sentiment']:.4f}")
+        print(f"  Negative Comments (%): {stats['negative_percentage']:.2f}%")
+        print(f"  Top 3 Keywords: {stats['keywords']}")
+        print()
+    
+    print("Top General Keywords:")
+    print("=" * 30)
+    print(analysis_data["keywords"])
 
 if __name__ == "__main__":
-    sample_text = "Hi, handmade soap is becoming a popular thing in chinese social media Hi everyone, i'm a beginner of handmade soap and i'm from china. I read some books from Taiwan teaching how to make basic soaps like Household soap and Marseille soap and more. Now, in little red book(one of the most popular social media in china), there are not only basic handmade soaps but also many with chinese traditional herbs. I read the recipes and most of the herbs are crushed into powder and then drop very little of them(lower than 10g in a 1000g mixture) into the oil.\n\nHere are the questions, most of the function materials in chinese herbs always release after hours boiling, so i wonder could we boil them for hours firstly(maybe like boiling lavender in western for 3 or 5 hours), and then add the cooking liquor into the cold process soap?\n\nAnother one is, \"cebaiye(one of the herbs) handmade soap for hair\" now is very popular in red book! As is known that handmade soap with lye couldn't be used on hair. Here is an alternative i read: boil the herbs all together(perhaps 10 different kinds of chinese traditional herbs used to protect hair, make it black, smooth and more), and then filtration with gauze, collect the soup liquor, and pour into bottle then freeze or refrigerate it. Once wash hair, just use perhaps 8ml of the liquor. I think it's a good idea!"
-    keywords = preprocess_text(sample_text)
-    sentiment = get_sentiment(sample_text)
-    print(f"Keywords: {keywords}")
-    print(f"Sentiment: {sentiment}")
+    text_processing()
