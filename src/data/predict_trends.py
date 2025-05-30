@@ -2,25 +2,84 @@ import os
 import csv
 import json
 from datetime import datetime
+import sys
 
-def predict_trends():
+# ANSI color codes for console output
+class Colors:
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    RESET = "\033[0m"
+
+# Detect if the terminal supports ANSI colors (especially for PowerShell on Windows)
+def supports_color():
+    if not hasattr(sys.stdout, "isatty") or not sys.stdout.isatty():
+        return False
+    if os.name == "nt":
+        try:
+            os.system("")
+            return True
+        except:
+            return False
+    return True
+
+USE_COLORS = supports_color()
+
+def predict_trend(post_count, keyword_count, sentiment, approx_income):
+    social_score = (post_count * 5) + (keyword_count * 0.5) + (sentiment * 100)
+    income_score = approx_income * 0.1
+    trend_score = (0.7 * social_score) + (0.3 * income_score)
+
+    if trend_score > 2000:
+        growth_rate = 1.05
+        trend_direction = "Rising"
+    elif trend_score < 500:
+        growth_rate = 0.95
+        trend_direction = "Declining"
+    else:
+        growth_rate = 1.0
+        trend_direction = "Stable"
+
+    predicted_score = trend_score * growth_rate
+
+    confidence = min(95, 50 + (post_count / 10) + (keyword_count / 100) + (sentiment * 20))
+    confidence = max(50, confidence)
+
+    change_percentage = ((predicted_score - trend_score) / trend_score) * 100 if trend_score != 0 else 0
+
+    return trend_score, predicted_score, trend_direction, confidence, change_percentage
+
+def predict_trends(min_score_threshold=0):
     input_file = "data/processed/processed_trends.csv"
     if not os.path.exists(input_file):
         print("Error: Processed trends file not found.")
         return
 
+    expected_columns = ["product", "post_count", "keyword_count", "sentiment", "individual_cost", "estimated_monthly_revenue", "estimated_yearly_revenue"]
     trends_data = []
-    with open(input_file, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            trends_data.append({
-                "product": row["product"],
-                "post_count": int(row["post_count"]),
-                "keyword_count": int(row["keyword_count"]),
-                "sentiment": float(row["sentiment"]),
-                "avg_cost": float(row["avg_cost"]),
-                "approx_income": float(row["approx_income"])
-            })
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if not all(col in reader.fieldnames for col in expected_columns):
+                missing_cols = [col for col in expected_columns if col not in reader.fieldnames]
+                print(f"Error: Missing required columns in {input_file}: {missing_cols}")
+                return
+            
+            for row in reader:
+                trends_data.append({
+                    "product": row["product"],
+                    "post_count": int(row["post_count"]),
+                    "keyword_count": int(row["keyword_count"]),
+                    "sentiment": float(row["sentiment"]),
+                    "avg_cost": float(row["individual_cost"]),
+                    "approx_income": float(row["estimated_monthly_revenue"])
+                })
+    except KeyError as e:
+        print(f"Error: Missing expected column in {input_file}: {e}")
+        return
+    except ValueError as e:
+        print(f"Error: Invalid data format in {input_file}: {e}")
+        return
 
     predictions = []
     for item in trends_data:
@@ -31,39 +90,127 @@ def predict_trends():
         avg_cost = item["avg_cost"]
         approx_income = item["approx_income"]
 
-        # Updated trend score formula: Include social engagement and income potential
-        # Social Engagement Score: (post_count * 5) + (keyword_count * 0.5) + (sentiment * 100)
-        # Income Potential: (approx_income * 0.1)
-        # Total Trend Score: 0.7 * Social Engagement + 0.3 * Income Potential
-        social_score = (post_count * 5) + (keyword_count * 0.5) + (sentiment * 100)
-        income_score = approx_income * 0.1
-        trend_score = (0.7 * social_score) + (0.3 * income_score)
+        current_score, predicted_score, trend_direction, confidence, change_percentage = predict_trend(
+            post_count, keyword_count, sentiment, approx_income
+        )
 
-        growth_rate = 1.05 if trend_score > 2000 else 1.0
-        predicted_score = trend_score * growth_rate
+        if current_score < min_score_threshold:
+            continue
 
         predictions.append({
             "product": product,
-            "current_score": trend_score,
-            "predicted_score": predicted_score
+            "current_score": current_score,
+            "predicted_score": predicted_score,
+            "trend_direction": trend_direction,
+            "confidence": confidence,
+            "change_percentage": change_percentage,
+            "avg_cost": avg_cost,
+            "approx_income": approx_income
         })
 
+    if not predictions:
+        print("No products meet the minimum score threshold for prediction.")
+        return
+
+    predictions.sort(key=lambda x: x["predicted_score"], reverse=True)
+
+    # Display predictions with straight line separators between columns
+    print("\nTrend Prediction Results (Next 3 Months):")
+    print("=" * 89)
+    
+    # Define column widths (adjusted for the | separators)
+    col_widths = {
+        "No.": 5,
+        "Product": 26,
+        "Current Score": 15,
+        "Predicted Score": 15,
+        "Trend": 13,
+        "Change": 8,  # 5 for value (e.g., -5.00) + 1 space + 2 for %
+        "Confidence": 7  # 3 for value (e.g., 95) + 1 space + 2 for %
+    }
+    
+    # Print header
+    header = (
+        f"{'No.':<{col_widths['No.']}} | "
+        f"{'Product':<{col_widths['Product']}} | "
+        f"{'Current Score':<{col_widths['Current Score']}} | "
+        f"{'Predicted Score':<{col_widths['Predicted Score']}} | "
+        f"{'Trend':<{col_widths['Trend']}} | "
+        f"{'Change':<{col_widths['Change']}} | "
+        f"{'Confidence':<{col_widths['Confidence']}}"
+    )
+    print(header)
+    
+    # Print separator with + at column boundaries
+    separator = (
+        "-" * col_widths["No."] + "+" +
+        "-" * col_widths["Product"] + "+" +
+        "-" * col_widths["Current Score"] + "+" +
+        "-" * col_widths["Predicted Score"] + "+" +
+        "-" * col_widths["Trend"] + "+" +
+        "-" * col_widths["Change"] + "+" +
+        "-" * col_widths["Confidence"]
+    )
+    print(separator)
+    print()  # Blank line after header
+    
+    for idx, pred in enumerate(predictions, 1):
+        trend_display = pred["trend_direction"]
+        if USE_COLORS:
+            if pred["trend_direction"] == "Rising":
+                trend_display = f"{Colors.GREEN}{pred['trend_direction']}{Colors.RESET}"
+            elif pred["trend_direction"] == "Declining":
+                trend_display = f"{Colors.RED}{pred['trend_direction']}{Colors.RESET}"
+            else:
+                trend_display = f"{Colors.YELLOW}{pred['trend_direction']}{Colors.RESET}"
+        
+        # Format Change and Confidence with exact spacing
+        change_str = f"{pred['change_percentage']:>5.2f} %"
+        confidence_str = f"{pred['confidence']:>3.0f} %"
+        
+        row = (
+            f"{idx:<{col_widths['No.']}} | "
+            f"{pred['product']:<{col_widths['Product']}} | "
+            f"{pred['current_score']:<{col_widths['Current Score']}.2f} | "
+            f"{pred['predicted_score']:<{col_widths['Predicted Score']}.2f} | "
+            f"{trend_display:<{col_widths['Trend']}} | "
+            f"{change_str:<{col_widths['Change']}} | "
+            f"{confidence_str:<{col_widths['Confidence']}}"
+        )
+        print(row)
+        print()  # Blank line between rows
+
+    print(separator)
+
+    if not USE_COLORS:
+        print("\nNote: Trend colors (Rising: green, Stable: yellow, Declining: red) are not displayed. To enable colors in PowerShell, run: [Console]::OutputEncoding = [System.Text.Encoding]::UTF8")
+
+    # Save predictions to both JSON and CSV
     output_dir = "data/predictions"
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = os.path.join(output_dir, f"trend_predictions_{timestamp}.json")
-
-    with open(output_file, "w", encoding="utf-8") as f:
+    
+    json_output_file = os.path.join(output_dir, f"trend_predictions_{timestamp}.json")
+    with open(json_output_file, "w", encoding="utf-8") as f:
         json.dump(predictions, f, indent=4)
+    
+    csv_output_file = os.path.join(output_dir, f"trend_predictions_{timestamp}.csv")
+    with open(csv_output_file, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["product", "current_score", "predicted_score", "trend_direction", "change_percentage", "confidence", "avg_cost", "approx_income"])
+        for pred in predictions:
+            writer.writerow([
+                pred["product"],
+                pred["current_score"],
+                pred["predicted_score"],
+                pred["trend_direction"],
+                pred["change_percentage"],
+                pred["confidence"],
+                pred["avg_cost"],
+                pred["approx_income"]
+            ])
 
-    print("Trend Prediction Results:")
-    print("============================================================")
-    print(f"{'Product':<25} {'Current Score':<15} {'Predicted Score (3 Months)':<25}")
-    print("------------------------------------------------------------")
-    for pred in sorted(predictions, key=lambda x: x["current_score"], reverse=True):
-        print(f"{pred['product']:<25} {pred['current_score']:<15.2f} {pred['predicted_score']:<25.2f}")
-
-    print(f"\nSaved predictions to {output_file}")
+    print(f"\nSaved predictions to {json_output_file} (JSON) and {csv_output_file} (CSV)")
 
 if __name__ == "__main__":
-    predict_trends()
+    predict_trends(min_score_threshold=0)
