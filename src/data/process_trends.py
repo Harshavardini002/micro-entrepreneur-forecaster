@@ -4,21 +4,15 @@ import csv
 from datetime import datetime
 from collections import Counter
 import re
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer  # Added for better sentiment analysis
 
 def simple_sentiment_analysis(text):
-    positive_words = {"good", "great", "awesome", "beautiful", "love", "amazing", "wonderful", "nice", "fantastic", "excellent"}
-    negative_words = {"bad", "terrible", "awful", "poor", "hate", "disappointing", "horrible", "worst", "cheap", "broken"}
-    
-    text_lower = text.lower()
-    positive_count = sum(1 for word in positive_words if word in text_lower)
-    negative_count = sum(1 for word in negative_words if word in text_lower)
-    
-    total = positive_count + negative_count
-    if total == 0:
-        return 0.0
-    return (positive_count - negative_count) / total
+    analyzer = SentimentIntensityAnalyzer()
+    scores = analyzer.polarity_scores(text)
+    return scores['compound']  # Returns a score from -1 (negative) to 1 (positive)
 
 def extract_keywords(text, product, post_count, num_keywords=5):
+    # Expanded stop words list
     stop_words = {
         "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
         "is", "are", "was", "were", "this", "that", "these", "those",
@@ -35,7 +29,12 @@ def extract_keywords(text, product, post_count, num_keywords=5):
         "about", "more", "because", "get", "items", "wholesale", "price", "silver", "beading",
         "oil", "charms", "reddit", "here", "any", "media", "when", "full", "her", "really",
         "should", "maya", "anyone", "recognizes", "thriftstorehauls", "maker", "green", "neon",
-        "item", "tutorial", "set", "crafts"
+        "item", "tutorial", "set", "crafts",
+        # Added more stop words
+        "very", "so", "too", "also", "now", "then", "up", "down", "over", "under",
+        "it", "its", "he", "him", "his", "as", "be", "been", "being",
+        "do", "did", "doing", "say", "said", "go", "went", "gone",
+        "know", "knew", "think", "thought", "feel", "felt"
     }
     
     product_words = set()
@@ -70,7 +69,7 @@ def extract_keywords(text, product, post_count, num_keywords=5):
     stop_words = stop_words.union(product_words)
 
     words = re.findall(r'\b\w+\b', text.lower())
-    words = [word for word in words if word not in stop_words and len(word) > 2]
+    words = [word for word in words if word not in stop_words and len(word) > 3]  # Increased min length to 3
     
     word_counts = Counter(words)
     min_freq = 1 if post_count < 10 else 2
@@ -94,7 +93,9 @@ def extract_keywords(text, product, post_count, num_keywords=5):
     boosted_counts = Counter()
     for word, count in word_counts.items():
         if word in descriptive_keywords.get(product, []):
-            boosted_counts[word] = count * 50
+            boosted_counts[word] = count * 100  # Increased boost factor from 50 to 100
+        else:
+            boosted_counts[word] = count
     
     top_keywords = [word for word, count in boosted_counts.most_common(num_keywords)]
     while len(top_keywords) < num_keywords:

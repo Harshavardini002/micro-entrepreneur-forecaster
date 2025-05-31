@@ -5,9 +5,9 @@ from collections import Counter
 from datetime import datetime
 
 def clean_text(text):
-    text = re.sub(r'http[s]?://\S+|www\.\S+', '', text)
-    text = re.sub(r'[^\w\s,.!?-]', '', text)
-    text = ' '.join(text.split())
+    text = re.sub(r'http[s]?://\S+|www\.\S+', '', text)  # Remove URLs
+    text = re.sub(r'[^\w\s,.!?-]', '', text)  # Remove special characters
+    text = ' '.join(text.split())  # Normalize whitespace
     return text
 
 def is_relevant_entry(entry):
@@ -19,11 +19,18 @@ def is_relevant_entry(entry):
     if any(indicator in text for indicator in spam_indicators):
         return False
     
-    if len(text.split()) < 3:
+    # Increase minimum length to 10 words (approx. 50 characters)
+    if len(text.split()) < 10:
         return False
     
     off_topic_indicators = ["subreddit", "reddit", "discord", "rules", "mods", "post removed"]
     if any(indicator in text for indicator in off_topic_indicators):
+        return False
+    
+    # Filter out generic comments
+    generic_words = ["nice", "great", "cool", "awesome", "thanks", "love it", "good", "amazing", "wonderful"]
+    generic_count = sum(text.count(word) for word in generic_words)
+    if generic_count > 2:  # Allow up to 2 generic words
         return False
     
     return True

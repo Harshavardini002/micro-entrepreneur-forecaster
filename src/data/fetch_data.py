@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from dotenv import load_dotenv
 
-def fetch_reddit_data(query, product_name, max_posts=300, max_comments=100, existing_posts=None, reddit=None):
+def fetch_reddit_data(query, product_name, max_posts=500, max_comments=100, existing_posts=None, reddit=None):
     if existing_posts is None:
         existing_posts = set()
     cache_file = f"data/cache/{query.replace(' ', '_')}.pkl"
@@ -26,14 +26,15 @@ def fetch_reddit_data(query, product_name, max_posts=300, max_comments=100, exis
     product_keywords = product_name.lower().split()
     
     results, comments = [], []
-    # Combined subreddits for all products
+    # Combined subreddits for all products, updated with new subreddits for low-confidence products
     base_subreddits = (
         "Crafts+Handmade+Knitting+IndianArt+Artisan+Art+Etsy+HomeDecor+TextileArts+Ceramics+TraditionalArt+"
         "SouthAsianArt+FiberArts+DIY+Vintage+RedditMade+SmallBusiness+SomethingIMade+HandmadeGifts+"
         "KnittingPatterns+Crochet+PotteryStudio+CeramicArt+TextileDesign+IndianFashion+VintageDecor+"
         "CandleMakers+Woodworking+Carving+Soapmakers+NaturalBeauty+ArtMarket+DIYGifts+Crafty+"
         "ThriftStoreHauls+Frugal+Anticonsumption+SustainableLiving+Minimalism+Decor+InteriorDesign+"
-        "Jewelry+Quilting+Sustainable+Soapmaking+JewelryMaking+Beading+Leathercraft+Watercolor"
+        "Jewelry+Quilting+Sustainable+Soapmaking+JewelryMaking+Beading+Leathercraft+Watercolor+"
+        "Weaving+TextileArt+Pottery+CeramicsStudio+Metalworking+CandleMaking+Painting+Artists"
     )
     
     try:
@@ -94,7 +95,7 @@ def fetch_data():
     all_posts = []
     existing_posts = set()
     
-    # Define search queries for all products
+    # Define search queries for all products, updated with new queries for low-confidence products
     search_queries = [
         # Beaded Jewelry
         ("beaded jewelry", "beaded jewelry"),
@@ -108,6 +109,8 @@ def fetch_data():
         ("handmade painting", "handmade painting"),
         ("artisan painting", "handmade painting"),
         ("handcrafted painting", "handmade painting"),
+        ("handmade art painting", "handmade painting"),
+        ("artisan canvas painting", "handmade painting"),
         # Handmade Soap
         ("handmade soap", "handmade soap"),
         ("artisan soap", "handmade soap"),
@@ -121,21 +124,29 @@ def fetch_data():
         ("Brass Necklace", "handmade brass jewelry"),
         ("Artisan Brass Jewelry", "handmade brass jewelry"),
         ("handmade brass", "handmade brass jewelry"),
+        ("handmade brass necklace", "handmade brass jewelry"),
+        ("brass artisan jewelry", "handmade brass jewelry"),
         # Handmade Beeswax Candle
         ("Handmade Beeswax Candle", "handmade beeswax candle"),
         ("Beeswax Candle", "handmade beeswax candle"),
         ("Eco-Friendly Beeswax Candle", "handmade beeswax candle"),
         ("natural beeswax candle", "handmade beeswax candle"),
+        ("beeswax candle handmade", "handmade beeswax candle"),
+        ("natural candle artisan", "handmade beeswax candle"),
         # Handwoven Shawl
         ("Handwoven Shawl", "handwoven shawl"),
         ("Pashmina Shawl", "handwoven shawl"),
         ("Traditional Handwoven Shawl", "handwoven shawl"),
         ("handmade shawl", "handwoven shawl"),
+        ("artisan shawl", "handwoven shawl"),
+        ("handmade pashmina", "handwoven shawl"),
         # Handmade Terracotta Decor
         ("Handmade Terracotta Planter", "handmade terracotta decor"),
         ("Terracotta Figurine", "handmade terracotta decor"),
         ("Rustic Terracotta Decor", "handmade terracotta decor"),
         ("terracotta craft", "handmade terracotta decor"),
+        ("handmade terracotta pottery", "handmade terracotta decor"),
+        ("artisan terracotta", "handmade terracotta decor"),
         # Handmade Wooden Utensils
         ("Handmade Wooden Spoon", "handmade wooden utensils"),
         ("Wooden Bowl", "handmade wooden utensils"),
@@ -147,6 +158,8 @@ def fetch_data():
         ("Minimalist Embroidery", "embroidered textile"),
         ("embroidered fabric", "embroidered textile"),
         ("handmade embroidery", "embroidered textile"),
+        ("hand embroidered fabric", "embroidered textile"),
+        ("artisan embroidery textile", "embroidered textile"),
         # Vegan Soap
         ("Cold Process Soap", "vegan soap"),
         ("Essential Oil Soap", "vegan soap"),
@@ -156,7 +169,7 @@ def fetch_data():
     # Fetch data for all queries
     for query, product_name in search_queries:
         print(f"Fetching data for {product_name} using query: {query}")
-        posts, comments = fetch_reddit_data(query, product_name, max_posts=300, max_comments=100, existing_posts=existing_posts, reddit=reddit)
+        posts, comments = fetch_reddit_data(query, product_name, max_posts=500, max_comments=100, existing_posts=existing_posts, reddit=reddit)
         all_posts.extend(posts)
         for comment in comments:
             all_posts.append({
